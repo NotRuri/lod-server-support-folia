@@ -11,6 +11,7 @@ import net.minecraft.world.level.chunk.LevelChunk;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
+import org.bukkit.World;
 import org.bukkit.plugin.Plugin;
 
 import java.util.ArrayList;
@@ -62,12 +63,12 @@ public class PaperChunkGenerationService {
     private final int maxPerPlayerActive;
     private final int timeoutTicks;
 
-    /** Test seam: hands the async-load completion back to the main thread. Production
-     *  default is Bukkit's scheduler, which throws once the plugin is disabled —
-     *  tests inject throwing schedulers to pin that rejection containment. */
+    /** Test seam: hands the async-load completion to the chunk's owning region. Production
+     *  default uses {@link Bukkit#getRegionScheduler()} to run on the correct Folia region;
+     *  tests inject recording/throwing schedulers. */
     @FunctionalInterface
     interface MainThreadScheduler {
-        void schedule(Runnable task) throws Exception;
+        void schedule(World world, int cx, int cz, Runnable task);
     }
 
     // Wired in the constructor (default references the blank-final plugin field, which is
@@ -89,7 +90,8 @@ public class PaperChunkGenerationService {
         this.maxConcurrent = config.generationConcurrencyLimitGlobal;
         this.maxPerPlayerActive = config.generationConcurrencyLimitPerPlayer;
         this.timeoutTicks = config.generationTimeoutSeconds * LSSConstants.TICKS_PER_SECOND;
-        this.mainThreadScheduler = task -> Bukkit.getScheduler().runTask(this.plugin, task);
+        this.mainThreadScheduler = (world, cx, cz, task) ->
+                Bukkit.getRegionScheduler().run(this.plugin, world, cx, cz, scheduledTask -> task.run());
     }
 
     /**
@@ -135,11 +137,12 @@ public class PaperChunkGenerationService {
                 LSSLogger.error("Async chunk load failed at " + cx + "," + cz, ex);
             }
             var readyChunk = ex == null ? chunk : null;
-            // Ensure callback runs on the main thread — whenComplete does not guarantee thread
+            // Ensure callback runs on the chunk's owning region — whenComplete does not
+            // guarantee thread, and on Folia getChunkNow requires the correct region.
             try {
-                this.mainThreadScheduler.schedule(() ->
+                this.mainThreadScheduler.schedule(level.getWorld(), cx, cz, () ->
                         onChunkReady(key, level, readyChunk, cx, cz, token));
-            } catch (Exception scheduleEx) {
+            } catch (RuntimeException scheduleEx) {
                 // Plugin disabled during shutdown — do not call onChunkReady inline
                 // because we're on an async thread and active map is not thread-safe.
                 // shutdown() already clears the active map.

@@ -39,7 +39,10 @@ public abstract class AbstractChunkDiskReader {
     protected final DiskReaderDiagnostics diag = new DiskReaderDiagnostics();
 
     protected AbstractChunkDiskReader(int threadCount) {
-        int queueCapacity = threadCount * QUEUE_CAPACITY_PER_THREAD;
+        this(threadCount, threadCount * QUEUE_CAPACITY_PER_THREAD);
+    }
+
+    protected AbstractChunkDiskReader(int threadCount, int queueCapacity) {
         this.executor = new ThreadPoolExecutor(threadCount, threadCount, 0L, TimeUnit.MILLISECONDS,
                 new ArrayBlockingQueue<>(queueCapacity), r -> {
             var thread = new Thread(r, "LSS Disk Reader #" + THREAD_COUNTER.incrementAndGet());

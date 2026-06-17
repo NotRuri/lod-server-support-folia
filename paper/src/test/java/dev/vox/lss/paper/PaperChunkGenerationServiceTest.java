@@ -565,7 +565,7 @@ class PaperChunkGenerationServiceTest {
         var world = mock(CraftWorld.class);
         when(level.getWorld()).thenReturn(world);
         when(world.getChunkAtAsync(7, -3, true, false)).thenReturn(future);
-        svc.setMainThreadScheduler(task -> { throw new RejectedExecutionException("plugin disabled"); });
+        svc.setMainThreadScheduler((w, cx, cz, task) -> { throw new RejectedExecutionException("plugin disabled"); });
 
         UUID a = UUID.randomUUID();
         assertTrue(svc.submitGeneration(a, level, 7, -3, 1L));
@@ -591,7 +591,7 @@ class PaperChunkGenerationServiceTest {
         when(level.getWorld()).thenReturn(world);
         when(world.getChunkAtAsync(2, 2, true, false)).thenReturn(future);
         var scheduled = new ArrayList<Runnable>();
-        svc.setMainThreadScheduler(scheduled::add);
+        svc.setMainThreadScheduler((w, cx, cz, task) -> scheduled.add(task));
 
         UUID a = UUID.randomUUID();
         assertTrue(svc.submitGeneration(a, level, 2, 2, 5L));

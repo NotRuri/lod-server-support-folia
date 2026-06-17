@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * is invisible until a real Paper server refuses to load — or silently mis-loads — the
  * plugin: an unresolvable {@code main} or wrong {@code api-version} aborts plugin load, a
  * renamed plugin moves the {@code plugins/LodServerSupport/} data folder the config and
- * soak staging rely on, and a {@code folia-supported} flag would let Folia run a plugin
- * built on main-thread BukkitRunnable assumptions.
+ * soak staging rely on, and the {@code folia-supported} flag tells Folia the plugin is safe
+ * to load in a regionised threading environment.
  */
 class PluginYmlContractTest {
 
@@ -98,9 +98,9 @@ class PluginYmlContractTest {
     }
 
     @Test
-    void foliaSupportedIsAbsent() {
-        assertFalse(yml.contains("folia-supported"),
-                "the plugin ticks via BukkitRunnable on the main thread; claiming Folia support would let Folia load it");
+    void foliaSupportedIsPresent() {
+        assertTrue(yml.getBoolean("folia-supported"),
+                "the plugin uses GlobalRegionScheduler; it must declare folia-supported: true to load on Folia");
     }
 
     @Test

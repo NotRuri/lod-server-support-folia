@@ -7,12 +7,13 @@ import net.minecraft.server.level.ServerPlayer;
 import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.entity.CraftPlayer;
 import org.bukkit.entity.Player;
+import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.messaging.PluginMessageListener;
-import org.bukkit.scheduler.BukkitRunnable;
+
 
 /**
  * Paper plugin entry point for LOD Server Support.
@@ -142,15 +143,13 @@ public class LSSPaperPlugin extends JavaPlugin implements PluginMessageListener,
 
             @Override
             public void scheduleServiceTick() {
-                new BukkitRunnable() {
-                    @Override
-                    public void run() {
-                        var service = requestService;
-                        if (service != null) {
-                            service.tick();
-                        }
-                    }
-                }.runTaskTimer(LSSPaperPlugin.this, 1L, 1L);
+                Bukkit.getGlobalRegionScheduler().runAtFixedRate(
+                        LSSPaperPlugin.this, task -> {
+                            var service = requestService;
+                            if (service != null) {
+                                service.tick();
+                            }
+                        }, 1L, 1L);
             }
 
             @Override

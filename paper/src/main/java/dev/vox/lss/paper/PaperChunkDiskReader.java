@@ -21,6 +21,10 @@ public class PaperChunkDiskReader extends AbstractChunkDiskReader {
         super(threadCount);
     }
 
+    public PaperChunkDiskReader(int threadCount, int queueCapacity) {
+        super(threadCount, queueCapacity);
+    }
+
     void setReadOverride(PaperNbtSectionSerializer.ChunkNbtRead read) {
         this.readOverride = read;
     }

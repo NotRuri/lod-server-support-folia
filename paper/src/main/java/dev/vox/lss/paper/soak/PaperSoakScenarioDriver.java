@@ -9,7 +9,7 @@ import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.Bukkit;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -93,12 +93,8 @@ public final class PaperSoakScenarioDriver implements Listener {
                 + " steps, end anchor " + scenario.end.anchor + " +" + scenario.end.at + "s)");
 
         plugin.getServer().getPluginManager().registerEvents(driver, plugin);
-        new BukkitRunnable() {
-            @Override
-            public void run() {
-                driver.onTick();
-            }
-        }.runTaskTimer(plugin, 1L, 1L);
+        Bukkit.getGlobalRegionScheduler().runAtFixedRate(
+                plugin, task -> driver.onTick(), 1L, 1L);
     }
 
     @EventHandler

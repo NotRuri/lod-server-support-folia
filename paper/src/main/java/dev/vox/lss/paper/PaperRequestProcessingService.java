@@ -47,6 +47,11 @@ public class PaperRequestProcessingService {
     private final long startTimeNanos = System.nanoTime();
     private final Map<ServerLevel, String> dimensionStringCache = new HashMap<>();
 
+    private final ConcurrentHashMap<UUID, Long2ObjectMap<LoadedColumnData>> pendingProbes = new ConcurrentHashMap<>();
+
+    // Null in test wiring (probe scheduling skipped); always set in production.
+    Plugin plugin;
+
     private int diagLogCounter = 0;
 
     private final TickDiagnostics diag = new TickDiagnostics();
@@ -98,6 +103,7 @@ public class PaperRequestProcessingService {
 
     public PaperRequestProcessingService(MinecraftServer server, Plugin plugin, PaperConfig config) {
         this(server, config, productionWiring(server, plugin, config));
+        this.plugin = plugin;
     }
 
     /** Test seam: same field wiring as production, collaborators injected. */
@@ -115,7 +121,7 @@ public class PaperRequestProcessingService {
 
     private static Wiring productionWiring(MinecraftServer server, Plugin plugin, PaperConfig config) {
         Map<UUID, PaperPlayerRequestState> players = new ConcurrentHashMap<>();
-        var diskReader = new PaperChunkDiskReader(config.diskReaderThreads);
+        var diskReader = new PaperChunkDiskReader(config.diskReaderThreads, config.diskReaderThreads * 2048);
         PaperChunkGenerationService generationService = config.enableChunkGeneration
                 ? new PaperChunkGenerationService(config, plugin) : null;
 
@@ -194,6 +200,8 @@ public class PaperRequestProcessingService {
         flushSendQueues(lifecycle.activeCount);
         this.dirtyBroadcaster.tick(this.config);
         tickDiagnosticsLog();
+
+        schedulePerPlayerProbes();
     }
 
     private List<TickSnapshot.GenerationReadyData> tickGenerationService() {
@@ -268,6 +276,17 @@ public class PaperRequestProcessingService {
             var skipPositions = genReadyPositions != null
                     ? genReadyPositions.get(player.getUUID()) : null;
             var probes = this.probeLoadedChunks(state, level, skipPositions);
+            // Merge async probe results from the previous tick's per-player EntityScheduler
+            // tasks (gives working chunk probing on Folia, where sync getChunkNow from the
+            // global region always returns null for chunks in other regions).
+            var asyncProbes = this.pendingProbes.remove(player.getUUID());
+            if (asyncProbes != null) {
+                if (probes.isEmpty()) {
+                    probes = asyncProbes;
+                } else {
+                    probes.putAll(asyncProbes);
+                }
+            }
             if (!probes.isEmpty()) {
                 loadedChunkProbes.put(player.getUUID(), probes);
             }
@@ -333,6 +352,51 @@ public class PaperRequestProcessingService {
         }
 
         return probes;
+    }
+
+    /**
+     * Schedule per-player chunk probing tasks on each player's region via EntityScheduler.
+     * On Folia, the global region thread can't call getChunkNow for chunks in other regions,
+     * so we probe from the player's own region (where nearby loaded chunks are accessible).
+     * Results are stored in {@link #pendingProbes} for the next global tick to consume.
+     * On regular Paper, EntityScheduler.run() schedules to the main thread, so the async
+     * probe results merge with the sync probe results from the same tick with no delay.
+     */
+    private void schedulePerPlayerProbes() {
+        if (this.plugin == null) return; // test mode — no live entity scheduling
+
+        for (var state : this.players.values()) {
+            if (!state.hasCompletedHandshake()) continue;
+            var player = state.getPlayer();
+            if (player.isRemoved()) continue;
+
+            var pending = state.getIncomingRequests();
+            if (!pending.iterator().hasNext()) continue;
+
+            player.getBukkitEntity().getScheduler().run(this.plugin, task -> {
+                if (player.isRemoved()) return;
+                var level = player.level();
+                var uuid = player.getUUID();
+                var probes = new Long2ObjectOpenHashMap<LoadedColumnData>();
+                int probed = 0;
+
+                for (var req : pending) {
+                    if (probed >= MAX_PROBES_PER_TICK_PER_PLAYER) break;
+                    long packed = PositionUtil.packPosition(req.cx(), req.cz());
+                    if (probes.containsKey(packed)) continue;
+                    var chunk = level.getChunkSource().getChunkNow(req.cx(), req.cz());
+                    if (chunk != null) {
+                        var column = PaperSectionSerializer.serializeColumn(level, chunk, req.cx(), req.cz());
+                        if (column != null) probes.put(packed, column);
+                    }
+                    probed++;
+                }
+
+                if (!probes.isEmpty()) {
+                    pendingProbes.put(uuid, probes);
+                }
+            }, () -> {});
+        }
     }
 
     private void drainSendActions() {
